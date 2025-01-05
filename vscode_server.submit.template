@@ -1,0 +1,15 @@
+batch_name = vcs
+universe = vanilla
+getenv = true
+request_cpus = 1
+request_memory = 32GB
+output = out.log
+error = out.log
+log = interactive.log
+nice_user = true
+request_gpus = 1
+executable = <code_server_executable>
+
+arguments = --port <port> --without-connection-token --accept-server-license-terms
+
+queue
