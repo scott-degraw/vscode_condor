@@ -1,12 +1,14 @@
 #!/bin/bash
 
+script_name="vscode_condor.sh"
+
 ########################################
 ##### SSH host
 ssh_host=int12_base
 ##### Optional configurables
 port=8080
-condor_batch_name=vcs
-code_executable=code
+condor_batch_name="vcs"
+code_executable="/usr/bin/code --enable-features=UseOzonePlatform,WaylandWindowDecorations --ozone-platform-hint=auto"
 client_user=$USER
 submit_template_file=$(dirname $0)/vscode_server.submit.template
 submit_filename=$(basename $submit_template_file)
@@ -16,9 +18,49 @@ vscode_server_dir=/home/$host_user/.vscode-server
 sleep_interval=0.5
 ########################################
 
+set -u
+
+usage_message="Usage: $script_name [-h | --help] [-p | --port] [-s | --ssh_host]"
+
+options=$(getopt -o hp:s:n:b: --long help,port:,ssh_host:,batch_name: -n \'${script_name}\' -- "$@")
+
+if [ $? -ne 0 ]; then
+	echo $usage_message
+	exit 1
+fi
+
+# Remove the annoying single quotes
+options="${options//\'/}"
+
+set -- $options
+
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		-h|--help)
+			echo $usage_message
+			exit 0 ;;
+		-p|--port)
+			port="$2"
+			shift 2 ;;
+		-s|--ssh_host)
+			ssh_host="$2"
+			shift 2 ;;
+		-b|--batch_name)
+			condor_batch_name="$2"
+			shift 2 ;;
+		--)
+			shift
+			break ;;
+		*)
+			echo "Error with getopt. Exiting" >&2
+			exit 1 ;;
+	esac
+done
+
 code_hash=$($code_executable -v | sed -n '2p')
 
 cp $submit_template_file $submit_filename
+sed "s/<batch_name>/$condor_batch_name/g" -i $submit_filename
 sed "s/<port>/$port/g" -i $submit_filename 
 code_server_exe=$vscode_server_dir/cli/servers/Stable-$code_hash/server/bin/code-server
 # We need to make this usable by sed through escaping 
@@ -30,7 +72,7 @@ job_id=$(ssh $ssh_host "condor_q $host_user -format \"%s,\" JobBatchName -format
 
 # If not running create job
 if [ -z "$job_id" ]; then
-	tmp_submit_file=/tmp/$submit_filename_$(date +%s)
+	tmp_submit_file=/tmp/$(basename $submit_filename)$(date +%s)
 	scp $submit_filename $ssh_host:$tmp_submit_file
 	job_id=$(ssh $ssh_host condor_submit $tmp_submit_file | grep -oP "(?<=cluster )\d+(?=\.)")
 
