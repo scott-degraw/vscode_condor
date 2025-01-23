@@ -1,7 +1,7 @@
-batch_name = vcs
+batch_name = <batch_name>
 universe = vanilla
 getenv = true
-request_cpus = 1
+request_cpus = 32
 request_memory = 32GB
 output = out.log
 error = out.log
@@ -9,6 +9,10 @@ log = interactive.log
 nice_user = true
 request_gpus = 1
 executable = <code_server_executable>
+transfer_executable = false
+
+should_transfer_files = yes
+transfer_input_files = /data/snoplus3/degraw/uniform_electron_energy/test_dset.h5
 
 arguments = --port <port> --without-connection-token --accept-server-license-terms
 

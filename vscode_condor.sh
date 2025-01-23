@@ -10,7 +10,7 @@ port=8080
 condor_batch_name="vcs"
 code_executable="/usr/bin/code --enable-features=UseOzonePlatform,WaylandWindowDecorations --ozone-platform-hint=auto"
 client_user=$USER
-submit_template_file=$(dirname $0)/vscode_server.submit.template
+submit_template_file=$(dirname $0)/template_submit_scripts/vscode_server.submit.template
 submit_filename=$(basename $submit_template_file)
 submit_filename=/tmp/${submit_filename%.*}
 host_user=$(ssh $ssh_host 'echo $USER')
