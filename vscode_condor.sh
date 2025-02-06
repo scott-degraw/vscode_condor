@@ -10,7 +10,7 @@ port=8080
 condor_batch_name="vcs"
 code_executable="/usr/bin/code --enable-features=UseOzonePlatform,WaylandWindowDecorations --ozone-platform-hint=auto"
 client_user=$USER
-submit_template_file=$(dirname $0)/template_submit_scripts/vscode_server.submit.template
+submit_template_file=$(dirname $0)/vscode_server.submit.template
 submit_filename=$(basename $submit_template_file)
 submit_filename=/tmp/${submit_filename%.*}
 host_user=$(ssh $ssh_host 'echo $USER')
@@ -104,8 +104,14 @@ function local_ssh_tunnel_check() {
 	return $?
 }
 
+if command -v autossh; then
+	tunnel_ssh_cmd='autossh -M 0'
+else
+	tunnel_ssh_cmd=ssh
+fi
+
 if ! local_ssh_tunnel_check; then
-	ssh $ssh_host -NfL localhost:$port:localhost:$port
+	$tunnel_ssh_cmd $ssh_host -NfL localhost:$port:localhost:$port
 	while ! local_ssh_tunnel_check; do
 		sleep $sleep_interval
 	done
