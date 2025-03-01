@@ -1,7 +1,5 @@
 #!/bin/bash
 
-script_name="vscode_condor.sh"
-
 ########################################
 ##### SSH host
 ssh_host=int12_base
@@ -10,22 +8,37 @@ port=8080
 condor_batch_name="vcs"
 code_executable="/usr/bin/code --enable-features=UseOzonePlatform,WaylandWindowDecorations --ozone-platform-hint=auto"
 client_user=$USER
-submit_template_file=$(dirname $0)/vscode_server.submit.template
+submit_template_file=$(dirname $0)/template.submit
 submit_filename=$(basename $submit_template_file)
 submit_filename=/tmp/${submit_filename%.*}
 host_user=$(ssh $ssh_host 'echo $USER')
 vscode_server_dir=/home/$host_user/.vscode-server
 sleep_interval=0.5
+code_server_arguments="--port $port --without-connection-token --accept-server-license-terms"
 ########################################
 
 set -u
 
-usage_message="Usage: $script_name [-h | --help] [-p | --port] [-s | --ssh_host]"
+script_name=$(basename $0)
+
+function usage() {
+	function option_line() {
+		printf "  %-20s %s\n" "$1" "$2" 
+	}
+	printf "Usage: %s [OPTION]... SUBMIT_SCRIPT\n" $script_name
+	echo A simple script to run a VSCode server instance on a condor worker node.
+	echo Options:
+	option_line "-h, --help" "display this help message" 
+	option_line "-p, --port" "port that the tunnel and vscode will run on"
+	option_line "-s, --ssh_host" "ssh host to connect to"
+	option_line "-b, --batch_name" "batch name for condor job"
+	echo The worker node resources are defined in the condor submission script SUBMIT_SCRIPT.
+}
 
 options=$(getopt -o hp:s:n:b: --long help,port:,ssh_host:,batch_name: -n \'${script_name}\' -- "$@")
 
 if [ $? -ne 0 ]; then
-	echo $usage_message
+	usage
 	exit 1
 fi
 
@@ -37,7 +50,7 @@ set -- $options
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 		-h|--help)
-			echo $usage_message
+			usage
 			exit 0 ;;
 		-p|--port)
 			port="$2"
@@ -67,55 +80,55 @@ code_server_exe=$vscode_server_dir/cli/servers/Stable-$code_hash/server/bin/code
 code_server_exe=$(echo $code_server_exe | sed 's/\//\\\//g') 
 sed "s/<code_server_executable>/$code_server_exe/g" -i $submit_filename
 
-# If already running get job id
-job_id=$(ssh $ssh_host "condor_q $host_user -format \"%s,\" JobBatchName -format \"%d.\" ClusterID -format \"%d\n\" ProcID" | grep $condor_batch_name -m1 | cut -d, -f 2)
+## If already running get job id
+#job_id=$(ssh $ssh_host "condor_q $host_user -format \"%s,\" JobBatchName -format \"%d.\" ClusterID -format \"%d\n\" ProcID" | grep $condor_batch_name -m1 | cut -d, -f 2)
 
-# If not running create job
-if [ -z "$job_id" ]; then
-	tmp_submit_file=/tmp/$(basename $submit_filename)$(date +%s)
-	scp $submit_filename $ssh_host:$tmp_submit_file
-	job_id=$(ssh $ssh_host condor_submit $tmp_submit_file | grep -oP "(?<=cluster )\d+(?=\.)")
+## If not running create job
+#if [ -z "$job_id" ]; then
+	#tmp_submit_file=/tmp/$(basename $submit_filename)$(date +%s)
+	#scp $submit_filename $ssh_host:$tmp_submit_file
+	#job_id=$(ssh $ssh_host condor_submit $tmp_submit_file | grep -oP "(?<=cluster )\d+(?=\.)")
 
-	# Wait until job starts
-	while [[ $(ssh $ssh_host "condor_q $job_id -format \"%d\" JobStatus") != 2 ]]; do
-		echo Waiting until condor job starts
-		sleep $sleep_interval
-	done
-fi
+	## Wait until job starts
+	#while [[ $(ssh $ssh_host "condor_q $job_id -format \"%d\" JobStatus") != 2 ]]; do
+		#echo Waiting until condor job starts
+		#sleep $sleep_interval
+	#done
+#fi
 
-# Check for condor_ssh_to_job already running. If not start ssh tunnel to job from login node.
-function condor_ssh_tunnel_check() {
-	ssh $ssh_host netstat -tulpn 2>&1 | grep -q 127.0.0.1:$port
-	return $?
-}
+## Check for condor_ssh_to_job already running. If not start ssh tunnel to job from login node.
+#function condor_ssh_tunnel_check() {
+	#ssh $ssh_host netstat -tulpn 2>&1 | grep -q 127.0.0.1:$port
+	#return $?
+#}
 
-if ! condor_ssh_tunnel_check; then
-	ssh $ssh_host "condor_ssh_to_job -auto-retry $job_id -NfL localhost:$port:localhost:$port" > /dev/null &
-	condor_ssh_to_job_pid=$!
-	while ! condor_ssh_tunnel_check; do
-		sleep $sleep_interval
-	done
-	kill $condor_ssh_to_job_pid
-fi
+#if ! condor_ssh_tunnel_check; then
+	#ssh $ssh_host "condor_ssh_to_job -auto-retry $job_id -NfL localhost:$port:localhost:$port" > /dev/null &
+	#condor_ssh_to_job_pid=$!
+	#while ! condor_ssh_tunnel_check; do
+		#sleep $sleep_interval
+	#done
+	#kill $condor_ssh_to_job_pid
+#fi
 
-# Check for local tunnel to login node is running
-function local_ssh_tunnel_check() {
-	netstat -tulpn 2>&1 | grep -q 127.0.0.1:$port
-	return $?
-}
+## Check for local tunnel to login node is running
+#function local_ssh_tunnel_check() {
+	#netstat -tulpn 2>&1 | grep -q 127.0.0.1:$port
+	#return $?
+#}
 
-if command -v autossh; then
-	tunnel_ssh_cmd='autossh -M 0'
-else
-	tunnel_ssh_cmd=ssh
-fi
+#if command -v autossh; then
+	#tunnel_ssh_cmd='autossh -M 0'
+#else
+	#tunnel_ssh_cmd=ssh
+#fi
 
-if ! local_ssh_tunnel_check; then
-	$tunnel_ssh_cmd $ssh_host -NfL localhost:$port:localhost:$port
-	while ! local_ssh_tunnel_check; do
-		sleep $sleep_interval
-	done
-fi
+#if ! local_ssh_tunnel_check; then
+	#$tunnel_ssh_cmd $ssh_host -NfL localhost:$port:localhost:$port
+	#while ! local_ssh_tunnel_check; do
+		#sleep $sleep_interval
+	#done
+#fi
 
-# Finally, start vscode connecting to local tunnel 
-$code_executable --remote localhost:$port 
+## Finally, start vscode connecting to local tunnel 
+#$code_executable --remote localhost:$port 
