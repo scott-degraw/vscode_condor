@@ -29,19 +29,20 @@ code_executable="code"
 sleep_interval=0.5
 
 # Source config file if it exists
-if [ -f $HOME/.config/vscode_condor_config ]; then
-	source $HOME/.config/vscode_condor_config
+if [ -f "$HOME"/.config/vscode_condor_config ]; then
+	# shellcheck disable=SC1091
+	source "$HOME"/.config/vscode_condor_config
 fi
 
 set -u
 
-script_name=$(basename $0)
+script_name=$(basename "$0")
 
 function usage() {
 	function option_line() {
 		printf "  %-20s %s\n" "$1" "$2" 
 	}
-	printf "Usage: %s [OPTION]... SUBMIT_SCRIPT\n" $script_name
+	printf "Usage: %s [OPTION]... SUBMIT_SCRIPT\n" "$script_name"
 	echo A simple script to run a VSCode server instance on a condor worker node.
 	echo Options:
 	option_line "-h, --help" "display this help message" 
@@ -50,8 +51,9 @@ function usage() {
 	echo The worker node resources are defined in the condor submission script SUBMIT_SCRIPT.
 }
 
-options=$(getopt -o hp:s:n:b: --long help,port:,ssh_host:,batch_name: -n \'${script_name}\' -- "$@")
+options=$(getopt -o hp:s:n:b: --long help,port:,ssh_host:,batch_name: -n \'"$script_name"\' -- "$@")
 
+# shellcheck disable=SC2181
 if [ $? -ne 0 ]; then
 	usage
 	exit 1
@@ -60,6 +62,7 @@ fi
 # Remove the annoying single quotes
 options="${options//\'/}"
 
+# shellcheck disable=SC2086
 set -- $options
 
 while [ $# -gt 0 ]; do
@@ -98,33 +101,35 @@ fi
 submit_template_file="$1"
 shift 
 
-host_user=$(ssh $ssh_host 'echo $USER')
+host_user=$(ssh "$ssh_host" 'echo $USER')
 vscode_server_dir=/home/$host_user/.vscode-server
 
-submit_filename=$(basename $submit_template_file)
+submit_filename=$(basename "$submit_template_file")
 submit_filename=/tmp/${submit_filename%.*}
 
 # Perform the variable substitution into the template submit file
 code_hash=$($code_executable -v | sed -n '2p')
 code_server_exe=$vscode_server_dir/cli/servers/Stable-$code_hash/server/bin/code-server
 code_server_args="--port $port --without-connection-token --accept-server-license-terms"
-condor_batch_name=$(sed -nE 's/batch_name[[:space:]]*=[[:space:]]*(.*)/\1/p' $submit_template_file)
+condor_batch_name=$(sed -nE 's/batch_name[[:space:]]*=[[:space:]]*(.*)/\1/p' "$submit_template_file")
 
 export code_server_exe
 export code_server_args
 envsubst < "$submit_template_file" > "$submit_filename"
 
 # If already running get job id
-job_id=$(ssh $ssh_host "condor_q $host_user -format \"%s,\" JobBatchName -format \"%d.\" ClusterID -format \"%d\n\" ProcID" | grep $condor_batch_name -m1 | cut -d, -f 2)
+job_id=$(ssh "$ssh_host" "condor_q ""$host_user"" -format \"%s,\" JobBatchName -format \"%d.\" ClusterID -format \"%d\n\" ProcID" \
+| grep "$condor_batch_name" -m1 | cut -d, -f 2)
 
 # If not running create job
 if [ -z "$job_id" ]; then
-	tmp_submit_file=/tmp/$(basename $submit_filename)$(date +%s)
-	scp $submit_filename $ssh_host:$tmp_submit_file
-	job_id=$(ssh $ssh_host condor_submit $tmp_submit_file | grep -oP "(?<=cluster )\d+(?=\.)")
+	tmp_submit_file=/tmp/$(basename "$submit_filename")$(date +%s)
+	scp "$submit_filename" "$ssh_host":"$tmp_submit_file"
+	# shellcheck disable=SC2029
+	job_id=$(ssh "$ssh_host" condor_submit "$tmp_submit_file" | grep -oP "(?<=cluster )\d+(?=\.)")
 
 	# Wait until job starts
-	while [[ $(ssh $ssh_host "condor_q $job_id -format \"%d\" JobStatus") != 2 ]]; do
+	while [[ $(ssh "$ssh_host" "condor_q ""$job_id"" -format \"%d\" JobStatus") != 2 ]]; do
 		echo Waiting until condor job starts
 		sleep $sleep_interval
 	done
@@ -132,12 +137,12 @@ fi
 
 # Check for condor_ssh_to_job already running. If not start ssh tunnel to job from login node.
 function condor_ssh_tunnel_check() {
-	ssh $ssh_host netstat -tulpn 2>&1 | grep -q 127.0.0.1:$port
+	ssh "$ssh_host" netstat -tulpn 2>&1 | grep -q 127.0.0.1:"$port"
 	return $?
 }
 
 if ! condor_ssh_tunnel_check; then
-	ssh $ssh_host "condor_ssh_to_job -auto-retry $job_id -NfL localhost:$port:localhost:$port" > /dev/null &
+	ssh "$ssh_host" "condor_ssh_to_job -auto-retry ""$job_id"" -NfL localhost:""$port"":localhost:""$port" > /dev/null &
 	condor_ssh_to_job_pid=$!
 	while ! condor_ssh_tunnel_check; do
 		sleep $sleep_interval
@@ -146,7 +151,8 @@ if ! condor_ssh_tunnel_check; then
 fi
 
 # Use autossh if available instead of ssh
-if command -v autossh; then
+if command -v autossh > /dev/null; then
+	echo Using autossh
 	tunnel_ssh_cmd='autossh -M 0'
 else
 	tunnel_ssh_cmd=ssh
@@ -157,16 +163,16 @@ netstat -tulpn 2>&1 | awk /"$port"/' { print $7 }' | grep -oE '^[0-9]+' | while 
 do
 	if ps -p "$pid" > /dev/null; then
 		echo "Killing $pid"
-		kill $pid
+		kill "$pid"
 	fi
 done
 
 # Start the tunnel
-$tunnel_ssh_cmd $ssh_host -NfL localhost:$port:localhost:$port
+$tunnel_ssh_cmd "$ssh_host" -NfL localhost:"$port":localhost:"$port"
 # Wait until the tunnel is active before starting vscode
-while ! netstat -tulpn 2>&1 | grep -q $port; do
+while ! netstat -tulpn 2>&1 | grep -q "$port"; do
 	sleep $sleep_interval
 done
 
 # Finally, start vscode connecting to local tunnel 
-$code_executable --remote localhost:$port 
+$code_executable --remote localhost:"$port" 
