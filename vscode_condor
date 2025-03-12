@@ -110,6 +110,13 @@ submit_filename=/tmp/${submit_filename%.*}
 # Perform the variable substitution into the template submit file
 code_hash=$($code_executable -v | sed -n '2p')
 code_server_exe=$vscode_server_dir/cli/servers/Stable-$code_hash/server/bin/code-server
+if [ -f "$code_server_exe" ]; then
+	echo "Using code-server $code_hash"
+else
+	echo "Error: code-server $code_hash not found. Please ssh into the "\
+	"login node with vscode to download correct vscode version."
+	exit 1
+fi
 code_server_args="--port $port --without-connection-token --accept-server-license-terms"
 condor_batch_name=$(sed -nE 's/batch_name[[:space:]]*=[[:space:]]*(.*)/\1/p' "$submit_template_file")
 
