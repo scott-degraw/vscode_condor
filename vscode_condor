@@ -164,13 +164,15 @@ fi
 
 # Find any processes that are using the port  
 tunnel_pids=$(netstat -tulpn 2>&1 | awk /"$port"/' { print $7 }' | grep -oE '^[0-9]+')
-while IFS= read -r pid
-do
-	if ps -p "$pid" > /dev/null; then
-		echo "Killing process $pid using port $port"
-		kill "$pid"
-	fi
-done <<< "$tunnel_pids"
+if [ -n "$tunnel_pids" ]; then
+	while IFS= read -r pid
+	do
+		if ps -p "$pid" > /dev/null; then
+			echo "Killing process $pid using port $port"
+			kill "$pid"
+		fi
+	done <<< "$tunnel_pids"
+fi
 
 if [ -z "$tunnel_pids" ]; then
 	echo Starting tunnel on port "$port"
