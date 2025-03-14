@@ -27,6 +27,7 @@
 port=8080
 code_executable="code"
 sleep_interval=0.5
+tunnel=false
 
 # Source config file if it exists
 if [ -f "$HOME"/.config/vscode_condor_config ]; then
@@ -46,12 +47,13 @@ function usage() {
 	echo A simple script to run a VSCode server instance on a condor worker node.
 	echo Options:
 	option_line "-h, --help" "display this help message" 
+	option_line "-t, --tunnel" "don't start vscode, just create/reestablish the tunnels. Useful when vscode is already running and tunnel connection is lost"
 	option_line "-p, --port" "port that the tunnel and vscode will run on"
 	option_line "-s, --ssh_host" "ssh host to connect to"
 	echo The worker node resources are defined in the condor submission script SUBMIT_SCRIPT.
 }
 
-options=$(getopt -o hp:s:n:b: --long help,port:,ssh_host:,batch_name: -n \'"$script_name"\' -- "$@")
+options=$(getopt -o htp:s: --long help,tunnel,port:,ssh_host: -n \'"$script_name"\' -- "$@")
 
 # shellcheck disable=SC2181
 if [ $? -ne 0 ]; then
@@ -76,9 +78,9 @@ while [ $# -gt 0 ]; do
 		-s|--ssh_host)
 			ssh_host="$2"
 			shift 2 ;;
-		-b|--batch_name)
-			condor_batch_name="$2"
-			shift 2 ;;
+		-t|--tunnel)
+			tunnel=true
+			shift ;;
 		--)
 			shift
 			break ;;
@@ -191,6 +193,8 @@ while ! netstat -tulpn 2>&1 | grep -q "$port"; do
 done
 printf "\nTunnel created\n"
 
+if [[ "$tunnel" != true ]]; then
 # Finally, start vscode connecting to local tunnel 
-echo Starting vscode
-$code_executable --remote localhost:"$port" 
+	echo Starting vscode
+	$code_executable --remote localhost:"$port" 
+fi
