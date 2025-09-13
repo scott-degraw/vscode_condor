@@ -22,6 +22,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+set -euo pipefail
 
 # Default values
 port=8080
@@ -35,8 +36,6 @@ if [ -f "$HOME"/.config/vscode_condor_config ]; then
 	source "$HOME"/.config/vscode_condor_config
 fi
 
-set -u
-
 script_name=$(basename "$0")
 
 function usage() {
@@ -46,57 +45,45 @@ function usage() {
 	printf "Usage: %s [OPTION]... SUBMIT_SCRIPT\n" "$script_name"
 	echo A simple script to run a VSCode server instance on a condor worker node.
 	echo Options:
-	option_line "-h, --help" "display this help message" 
-	option_line "-t, --tunnel" "don't start vscode, just create/reestablish the tunnels. Useful when vscode is already running and tunnel connection is lost"
-	option_line "-p, --port" "port that the tunnel and vscode will run on"
-	option_line "-s, --ssh_host" "ssh host to connect to"
+	option_line "-h" "display this help message" 
+	option_line "-t" "don't start vscode, just create/reestablish the tunnels. Useful when vscode is already running and tunnel connection is lost"
+	option_line "-p" "port that the tunnel and vscode will run on"
+	option_line "-s" "ssh host to connect to"
 	echo The worker node resources are defined in the condor submission script SUBMIT_SCRIPT.
 }
 
-options=$(getopt -o htp:s: --long help,tunnel,port:,ssh_host: -n \'"$script_name"\' -- "$@")
+function check_empty_arg() {
+	if [ -z "$2" ]; then
+		echo "Error: Argument for '$1' cannot be empty." >&2
+		exit 1
+	fi
+}
 
-# shellcheck disable=SC2181
-if [ $? -ne 0 ]; then
-	usage
-	exit 1
-fi
-
-# Remove the annoying single quotes
-options="${options//\'/}"
-
-# shellcheck disable=SC2086
-set -- $options
-
-while [ $# -gt 0 ]; do
-	case "$1" in
-		-h|--help)
-			usage
-			exit 0 ;;
-		-p|--port)
-			port="$2"
-			shift 2 ;;
-		-s|--ssh_host)
-			ssh_host="$2"
-			shift 2 ;;
-		-t|--tunnel)
-			tunnel=true
-			shift ;;
-		--)
-			shift
-			break ;;
-		*)
-			echo "Error with getopt. Exiting" >&2
-			exit 1 ;;
+while getopts ":htp:s:" opt; do 
+	case $opt in 
+		h) usage; exit 0 ;;
+		t) tunnel=true ;;
+		p) 
+			check_empty_arg "-p" "$OPTARG"
+		    if ! [[ "$OPTARG" =~ ^[0-9]+$ ]]; then
+				echo "Error: Port must be a number." >&2
+				exit 1
+		    fi
+			port="$OPTARG" 
+			;;
+		s) 
+			check_empty_arg "-s" "$OPTARG"
+			ssh_host="$OPTARG" 
+			;;
+		\?) echo "Invalid option: -$OPTARG" >&2; exit 1 ;;
+		:) echo "Option -$OPTARG requires an argument." >&2; exit 1 ;;
 	esac
 done
+shift $((OPTIND - 1))
 
-if [ $# -ne 1 ]; then 
-	if [ $# -lt 1 ]; then
-		echo "$script_name: need submission script" >&2
-	else
-		echo "$script_name: too many positional arguments" >&2
-	fi
-	echo "Try '$script_name --help' for more information"
+if [[ $# -gt 1 ]]; then
+	echo "Too many positional argument: $#" >&2
+	usage
 	exit 1
 fi
 
@@ -137,7 +124,7 @@ if [ -z "$job_id" ]; then
 	scp "$submit_filename" "$ssh_host":"$tmp_submit_file" > /dev/null
 	echo Submitting condor job
 	# shellcheck disable=SC2029
-	job_id=$(ssh "$ssh_host" condor_submit "$tmp_submit_file" | grep -oP "(?<=cluster )\d+(?=\.)")
+	job_id=$(ssh "$ssh_host" condor_submit "$tmp_submit_file" | grep -oE 'cluster [0-9]+' | cut -d' ' -f2)
 fi
 
 # Check for condor_ssh_to_job already running. If not start ssh tunnel to job from login node.
@@ -163,38 +150,28 @@ if command -v autossh > /dev/null; then
 else
 	tunnel_ssh_cmd=ssh
 fi
-
-# Find any processes that are using the port  
-tunnel_pids=$(netstat -tulpn 2>&1 | awk /"$port"/' { print $7 }' | grep -oE '^[0-9]+')
-if [ -n "$tunnel_pids" ]; then
-	while IFS= read -r pid
-	do
-		if ps -p "$pid" > /dev/null; then
-			echo "Killing process $pid using port $port"
-			kill "$pid"
-		fi
-	done <<< "$tunnel_pids"
-fi
-
-if [ -z "$tunnel_pids" ]; then
-	echo Starting tunnel on port "$port"
-else
-	echo Restarting tunnel on port "$port"
-fi
+tunnel_ssh_cmd=ssh
 
 # Start the tunnel
-$tunnel_ssh_cmd "$ssh_host" -NfL localhost:"$port":localhost:"$port"
-# Wait until the tunnel is active before starting vscode
-spinner=(/ - \\ \|)
-i=0
-while ! netstat -tulpn 2>&1 | grep -q "$port"; do
-	printf "\r%s %s" "Waiting for tunnel to start" "${spinner[i++ % ${#spinner[@]}]}"
-	sleep 0.2
-done
-printf "\nTunnel created\n"
+tunnel_cmd="$tunnel_ssh_cmd $ssh_host -Nf -o ExitOnForwardFailure=yes -L localhost:$port:localhost:$port"
+pid=$(pgrep -f "$tunnel_cmd" || true)
+if [ "$pid" ]; then
+	while IFS= read -r pid; do
+		if ps -p "$pid" > /dev/null; then
+			echo "Killing existing tunnel process with PID $pid using port $port"
+			kill "$pid"
+		fi
+	done <<< "$pid"
+fi
+
+eval "$tunnel_cmd"
+if [ $? -ne 0 ]; then
+	echo "Error: Failed to create SSH tunnel." >&2
+	exit 1
+fi
 
 if [[ "$tunnel" != true ]]; then
 # Finally, start vscode connecting to local tunnel 
 	echo Starting vscode
-	$code_executable --remote localhost:"$port" 
+	$code_executable -n --remote localhost:"$port" 
 fi
