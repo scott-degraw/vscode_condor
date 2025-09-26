@@ -24,6 +24,8 @@
 
 set -euo pipefail
 
+trap 'echo "Error in line ${LINENO}" >&2; echo "$BASH_COMMAND" >&2' ERR
+
 # Default values
 port=8080
 code_executable="code"
@@ -114,11 +116,15 @@ export code_server_args
 envsubst < "$submit_template_file" > "$submit_filename"
 
 # If already running get job id
-job_id=$(ssh "$ssh_host" "condor_q ""$host_user"" -format \"%s,\" JobBatchName -format \"%d.\" ClusterID -format \"%d\n\" ProcID" \
-| grep "$condor_batch_name" -m1 | cut -d, -f 2)
+condor_query=$(ssh "$ssh_host" "condor_q ""$host_user"" -format \"%s,\" JobBatchName -format \"%d.\" ClusterID -format \"%d\n\" ProcID")
+n_job_matches=$(grep "$condor_batch_name" -c <<< "$condor_query" || true)
+if [ "$n_job_matches" -gt 1 ]; then
+	echo Multiple jobs with batch name: "$condor_batch_name" >&2
+	exit 1
+fi
 
 # If not running create job
-if [ -z "$job_id" ]; then
+if [ "$n_job_matches" -eq 0 ]; then
 	echo Transferring condor submit file 
 	tmp_submit_file=/tmp/$(basename "$submit_filename")$(date +%s)
 	scp "$submit_filename" "$ssh_host":"$tmp_submit_file" > /dev/null
